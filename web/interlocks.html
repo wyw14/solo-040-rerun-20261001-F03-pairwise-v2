@@ -1,10 +1,25 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LockFlow Interlocks</title><link rel="stylesheet" href="/assets/styles.css"></head>
 <body><header><div class="brand"><span class="brand-mark">LF</span>LockFlow</div><nav><a href="/operations">Operations</a><a href="/chamber">Chamber</a><a aria-current="page" href="/interlocks">Interlocks</a><a href="/incidents">Incidents</a></nav></header>
-<main><div class="page-title"><div><h1>Interlock control</h1><div class="muted">Mutual exclusion and emergency equipment state</div></div></div><div class="grid" id="interlock-grid"></div><div class="message" id="message"></div></main>
+<main><div class="page-title"><div><h1>Interlock control</h1><div class="muted">执行中命令与待重发失败命令</div></div></div><div class="grid" id="interlock-grid"></div><div class="message" id="message"></div></main>
 <script src="/assets/app.js"></script><script>
-const {api,setMessage,withBusy}=window.LockFlow; const host=document.querySelector('#interlock-grid'); const message=document.querySelector('#message');
-async function stop(chamber,button){await withBusy(button,async()=>{try{await api(`/api/chambers/${chamber}/emergency`,{method:'POST',body:'{}'});await load();}catch(e){setMessage(message,e.message);}});}
-async function load(){const data=await api('/api/interlocks');host.innerHTML=Object.entries(data).map(([id,item])=>`<section class="panel"><h2>${id}</h2><table><tr><th>Emergency</th><td>${item.emergency.status}</td></tr><tr><th>Level</th><td>${item.equipment.LevelM??item.equipment.level_m??0} m</td></tr><tr><th>Pending commands</th><td>${item.pending_commands.length}</td></tr></table><button class="danger" data-stop="${id}">Emergency stop</button></section>`).join('');host.querySelectorAll('[data-stop]').forEach((button)=>button.addEventListener('click',()=>stop(button.dataset.stop,button)));}
+const {api,setMessage,withBusy,shortID,stateBadge,escapeHTML}=window.LockFlow;
+const host=document.querySelector('#interlock-grid'); const message=document.querySelector('#message');
+async function post(path,body){return api(path,{method:'POST',body:body?JSON.stringify(body):undefined});}
+async function stop(chamber,button){await withBusy(button,async()=>{try{await post(`/api/chambers/${chamber}/emergency`,{});await load();}catch(e){setMessage(message,e.message);}});}
+async function retry(chamber,id,button){await withBusy(button,async()=>{try{await post(`/api/chambers/${chamber}/commands/${id}/retry`);await load();}catch(e){setMessage(message,e.message);}});}
+const cmdRow=(chamber,c)=>`<tr><td>${escapeHTML(c.device)}</td><td>${shortID(c.id)}${c.attempt>1?` <span class="attempt">第${c.attempt}次</span>`:''}</td><td>${stateBadge(c.state)}</td><td>${c.reason?escapeHTML(c.reason):'-'}</td><td>${(c.state==='failed'||c.state==='timed_out')?`<button class="warn" data-retry="${c.id}">安全重发</button>`:''}</td></tr>`;
+async function load(){
+  const data=await api('/api/interlocks');
+  host.innerHTML=Object.entries(data).filter(([id])=>id!=='signal_handoffs').map(([id,item])=>{
+    const pending=item.pending_commands||[]; const blocking=item.blocking_commands||[];
+    const rows=[...pending,...blocking];
+    const table=rows.length?`<table class="commands"><thead><tr><th>设备</th><th>命令</th><th>状态</th><th>原因</th><th></th></tr></thead><tbody>${rows.map((c)=>cmdRow(id,c)).join('')}</tbody></table>`:'<div class="muted">无进行中或待重发命令</div>';
+    return `<section class="panel" data-chamber="${id}"><h2>${id}</h2><table><tr><th>Emergency</th><td>${item.emergency.status}</td></tr><tr><th>Level</th><td>${item.equipment.LevelM??item.equipment.level_m??0} m</td></tr><tr><th>执行中 / 待重发</th><td>${pending.length} / ${blocking.length}</td></tr></table>${table}<button class="danger" data-stop="${id}">Emergency stop</button></section>`;
+  }).join('');
+  host.querySelectorAll('[data-stop]').forEach((b)=>b.addEventListener('click',()=>stop(b.dataset.stop,b)));
+  host.querySelectorAll('[data-retry]').forEach((b)=>b.addEventListener('click',()=>{const chamber=b.closest('section').dataset.chamber;retry(chamber,b.dataset.retry,b);}));
+}
 load().catch((e)=>setMessage(message,e.message));
+setInterval(()=>load().catch(()=>{}),5000);
 </script></body></html>

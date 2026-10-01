@@ -17,31 +17,40 @@ type ChamberView struct {
 	Gates     map[model.Direction]model.GatePosition `json:"gates"`
 	Queue     []admission.QueueEntry                 `json:"queue"`
 	Signals   []model.SignalState                    `json:"signals"`
-	Emergency model.EmergencyRecord                  `json:"emergency"`
-	UpdatedAt time.Time                              `json:"updated_at"`
+	// Pending commands are still being received or executed by the device.
+	Pending []model.DeviceCommand `json:"pending_commands"`
+	// Blocking commands failed or timed out and hold the transit waiting.
+	Blocking  []model.DeviceCommand `json:"blocking_commands"`
+	Emergency model.EmergencyRecord `json:"emergency"`
+	UpdatedAt time.Time             `json:"updated_at"`
 }
 
 // Snapshot aggregates current responsibilities without taking ownership.
 type Snapshot struct {
-	cycles  *cycle.Coordinator
-	gates   *gate.State
-	queue   *admission.Service
-	signals *signal.Service
-	safety  *safety.Service
-	now     func() time.Time
+	cycles   *cycle.Coordinator
+	gates    *gate.State
+	commands *gate.Commands
+	queue    *admission.Service
+	signals  *signal.Service
+	safety   *safety.Service
+	now      func() time.Time
 }
 
-func NewSnapshot(cycles *cycle.Coordinator, gates *gate.State, queue *admission.Service, signals *signal.Service, safetyService *safety.Service, now func() time.Time) *Snapshot {
+func NewSnapshot(cycles *cycle.Coordinator, gates *gate.State, commands *gate.Commands, queue *admission.Service, signals *signal.Service, safetyService *safety.Service, now func() time.Time) *Snapshot {
 	if now == nil {
 		now = time.Now
 	}
-	return &Snapshot{cycles: cycles, gates: gates, queue: queue, signals: signals, safety: safetyService, now: now}
+	return &Snapshot{
+		cycles: cycles, gates: gates, commands: commands, queue: queue,
+		signals: signals, safety: safetyService, now: now,
+	}
 }
 
 func (s *Snapshot) Chamber(chamberID string) ChamberView {
 	view := ChamberView{
 		ChamberID: chamberID, Gates: s.gates.Snapshot(chamberID),
 		Queue: s.queue.List(chamberID), Signals: s.signals.States(),
+		Pending: s.commands.Pending(chamberID), Blocking: s.commands.Blocking(chamberID),
 		Emergency: s.safety.Status(chamberID), UpdatedAt: s.now().UTC(),
 	}
 	if cycleValue, ok := s.cycles.Current(chamberID); ok {

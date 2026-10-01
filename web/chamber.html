@@ -1,9 +1,5 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LockFlow Chamber</title><link rel="stylesheet" href="/assets/styles.css"></head>
 <body><header><div class="brand"><span class="brand-mark">LF</span>LockFlow</div><nav><a href="/operations">Operations</a><a aria-current="page" href="/chamber">Chamber</a><a href="/interlocks">Interlocks</a><a href="/incidents">Incidents</a></nav></header>
-<main><div class="page-title"><div><h1>Chamber situation</h1><div class="muted">Gate, cycle, queue and signal state</div></div><button id="refresh">Refresh</button></div><div class="grid" id="chambers"></div><div class="message" id="message"></div></main>
-<script src="/assets/app.js"></script><script>
-const {api,shortID,setMessage}=window.LockFlow; const host=document.querySelector('#chambers'); const message=document.querySelector('#message');
-async function load(){const items=await api('/api/chambers'); host.innerHTML=items.map((item)=>`<section class="panel"><h2>${item.chamber_id}</h2><div class="metrics"><div class="metric">Stage<strong>${item.cycle?.stage||'idle'}</strong></div><div class="metric">Upstream<strong>${item.gates?.upstream||'-'}</strong></div><div class="metric">Downstream<strong>${item.gates?.downstream||'-'}</strong></div></div><table><tr><th>Cycle</th><td>${shortID(item.cycle?.id)}</td></tr><tr><th>Queue</th><td>${item.queue?.length||0} vessel(s)</td></tr><tr><th>Emergency</th><td>${item.emergency?.status||'idle'}</td></tr></table></section>`).join(''); setMessage(message,'');}
-document.querySelector('#refresh').addEventListener('click',()=>load().catch((e)=>setMessage(message,e.message))); load().catch((e)=>setMessage(message,e.message));
-</script></body></html>
+<main><div class="page-title"><div><h1>Chamber situation</h1><div class="muted">真实命令进展：接收 / 执行 / 完成 / 失败 / 超时</div></div><button id="refresh">Refresh</button></div><div class="grid" id="chambers"></div><div class="message" id="message"></div></main>
+<script src="/assets/app.js"></script><script src="/assets/chamber.js"></script></body></html>

@@ -30,7 +30,8 @@ func (r *Recovery) RestoreAll(ctx context.Context) (map[string]model.TransitCycl
 			if event.ChamberID != chamberID {
 				return nil, fmt.Errorf("event partition mismatch chamber=%s event=%s", chamberID, event.ChamberID)
 			}
-			if event.Type == model.EventCycleCreated || event.Type == model.EventCycleAdvanced {
+			switch event.Type {
+			case model.EventCycleCreated, model.EventCycleAdvanced:
 				var decoded model.TransitCycle
 				if err := event.Decode(&decoded); err != nil {
 					return nil, err
@@ -40,6 +41,18 @@ func (r *Recovery) RestoreAll(ctx context.Context) (map[string]model.TransitCycl
 				}
 				cycleCopy := decoded
 				cycleValue = &cycleCopy
+			case model.EventCommandQueued, model.EventCommandAccepted, model.EventCommandExecuting,
+				model.EventCommandSettled, model.EventCommandFailed, model.EventCommandTimedOut:
+				var command model.DeviceCommand
+				if err := event.Decode(&command); err != nil {
+					return nil, err
+				}
+				if command.ChamberID != chamberID {
+					return nil, fmt.Errorf("command partition mismatch chamber=%s command=%s", chamberID, command.ChamberID)
+				}
+				// Each command event carries the full post-transition snapshot;
+				// Restore keeps the newest one per command ID.
+				r.coordinator.gates.Commands().Restore(command)
 			}
 		}
 		if cycleValue != nil {

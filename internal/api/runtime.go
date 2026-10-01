@@ -43,6 +43,7 @@ type Runtime struct {
 	Incidents       *monitor.IncidentReview
 	Health          *monitor.HealthRegistry
 	Recovery        *cycle.Recovery
+	Watchdog        *gate.Watchdog
 	Chambers        []string
 	Now             func() time.Time
 }
@@ -91,6 +92,7 @@ func NewRuntime(ctx context.Context, dataDirectory string) (*Runtime, error) {
 	cycleService := cycle.NewService(cycleCoordinator, admissionService)
 	safetyCoordinator = safety.NewCoordinator(gateCommands, barrier, recorder, now)
 	safetyService := safety.NewService(safetyCoordinator, cycleCoordinator)
+	cycleCoordinator.BindEmergency(safetyCoordinator.Active)
 	signalService.BindTransitLookup(cycleCoordinator)
 	replayer := journal.NewReplayer(store)
 	recovery := cycle.NewRecovery(replayer, cycleCoordinator)
@@ -106,6 +108,7 @@ func NewRuntime(ctx context.Context, dataDirectory string) (*Runtime, error) {
 			health.Observe(chamberID, device, true, "telemetry current", now())
 		}
 	}
+	watchdog := gate.NewWatchdog(gateController, time.Second, now)
 	return &Runtime{
 		Store: store, Recorder: recorder, GateState: gateState,
 		GateCommands: gateCommands, Gates: gateController,
@@ -114,8 +117,8 @@ func NewRuntime(ctx context.Context, dataDirectory string) (*Runtime, error) {
 		Planner: planner, Schedule: scheduleService, Hydraulics: hydraulicsController,
 		Interlocks: interlockCoordinator, Cycles: cycleCoordinator, CycleService: cycleService,
 		Leases: leaseService, LeaseSweeper: leaseSweeper, Safety: safetyService,
-		Snapshot:  monitor.NewSnapshot(cycleCoordinator, gateState, admissionService, signalService, safetyService, now),
+		Snapshot:  monitor.NewSnapshot(cycleCoordinator, gateState, gateCommands, admissionService, signalService, safetyService, now),
 		Incidents: monitor.NewIncidentReview(store), Health: health, Recovery: recovery,
-		Chambers: chambers, Now: now,
+		Watchdog: watchdog, Chambers: chambers, Now: now,
 	}, nil
 }

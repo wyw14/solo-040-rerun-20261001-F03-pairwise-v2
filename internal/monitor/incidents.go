@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -43,6 +44,9 @@ func (r *IncidentReview) List(ctx context.Context) ([]Incident, error) {
 			if !include {
 				continue
 			}
+			if event.Type == model.EventCommandFailed || event.Type == model.EventCommandTimedOut {
+				summary = commandFailureSummary(event, summary)
+			}
 			result = append(result, Incident{
 				ID: event.ID, ChamberID: chamberID, Severity: severity,
 				Summary: summary, EventType: event.Type, Sequence: event.Sequence,
@@ -60,6 +64,10 @@ func incidentMeaning(kind model.EventType) (string, string, bool) {
 		return "critical", "Emergency stop requested", true
 	case model.EventEmergencySettled:
 		return "notice", "Emergency equipment reached stable state", true
+	case model.EventCommandFailed:
+		return "critical", "Device command failed", true
+	case model.EventCommandTimedOut:
+		return "critical", "Device command timed out", true
 	case model.EventReplayWarning:
 		return "warning", "Recovery sequence requires review", true
 	case model.EventPlanCancelled:
@@ -67,4 +75,17 @@ func incidentMeaning(kind model.EventType) (string, string, bool) {
 	default:
 		return "", "", false
 	}
+}
+
+// commandFailureSummary attaches the device, action and reported reason so the
+// operator understands why the command did not complete.
+func commandFailureSummary(event model.Event, summary string) string {
+	var command model.DeviceCommand
+	if err := event.Decode(&command); err != nil {
+		return summary
+	}
+	if command.Reason != "" {
+		return fmt.Sprintf("%s: %s %s — %s", summary, command.Device, command.Action, command.Reason)
+	}
+	return fmt.Sprintf("%s: %s %s", summary, command.Device, command.Action)
 }

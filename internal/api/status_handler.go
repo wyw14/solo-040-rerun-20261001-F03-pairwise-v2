@@ -26,6 +26,7 @@ func interlocksHandler(runtime *Runtime) http.HandlerFunc {
 				"equipment":         runtime.Interlocks.Snapshot(chamberID),
 				"emergency":         runtime.Safety.Status(chamberID),
 				"pending_commands":  runtime.GateCommands.Pending(chamberID),
+				"blocking_commands": runtime.GateCommands.Blocking(chamberID),
 				"pending_equipment": runtime.Safety.Barrier().Pending(chamberID),
 				"reservation":       reservationValue,
 			}

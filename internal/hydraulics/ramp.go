@@ -6,12 +6,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/wyw14/cry-96/internal/model"
 )
 
 type RampStep struct {
 	Target    float64   `json:"target"`
 	IssuedAt  time.Time `json:"issued_at"`
+	CommandID uuid.UUID `json:"command_id"`
 	Completed bool      `json:"completed"`
 }
 
@@ -20,7 +22,7 @@ type RampResult struct {
 	Cancelled bool       `json:"cancelled"`
 }
 
-type StepIssuer func(context.Context, model.TransitCycle, float64) error
+type StepIssuer func(context.Context, model.TransitCycle, float64) (model.DeviceCommand, error)
 
 // Ramp executes each valve target under the caller's lifecycle.
 type Ramp struct {
@@ -51,9 +53,11 @@ func (r *Ramp) Run(ctx context.Context, cycle model.TransitCycle, targets []floa
 			return result, err
 		}
 		step := RampStep{Target: target, IssuedAt: r.now().UTC()}
-		if err := issue(ctx, cycle, target); err != nil {
+		command, err := issue(ctx, cycle, target)
+		if err != nil {
 			return result, err
 		}
+		step.CommandID = command.ID
 		step.Completed = true
 		result.Steps = append(result.Steps, step)
 		r.mu.Lock()

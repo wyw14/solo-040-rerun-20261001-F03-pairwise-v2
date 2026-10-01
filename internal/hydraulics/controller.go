@@ -78,7 +78,7 @@ func (c *Controller) windowForCycle(cycleID interface{ String() string }, genera
 	return nil, errors.New("no active level window for transit")
 }
 
-func (c *Controller) IssueValve(ctx context.Context, cycle model.TransitCycle, target float64) error {
+func (c *Controller) IssueValve(ctx context.Context, cycle model.TransitCycle, target float64) (model.DeviceCommand, error) {
 	device := model.DeviceFillValve
 	if target < 0 {
 		device = model.DeviceDrainValve
@@ -86,10 +86,10 @@ func (c *Controller) IssueValve(ctx context.Context, cycle model.TransitCycle, t
 	}
 	command, err := c.commands.Issue(cycle, device, "set_opening", target, c.now())
 	if err != nil {
-		return err
+		return model.DeviceCommand{}, err
 	}
 	_, err = c.recorder.Record(ctx, cycle.ChamberID, model.EventCommandQueued, cycle.ID, cycle.Generation, command)
-	return err
+	return command, err
 }
 
 func (c *Controller) RampTo(ctx context.Context, cycle model.TransitCycle, targets []float64) (RampResult, error) {

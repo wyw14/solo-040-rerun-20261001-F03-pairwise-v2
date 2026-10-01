@@ -31,6 +31,8 @@ func mustCurrent(runtime *Runtime, chamberID string) model.TransitCycle {
 	return cycleValue
 }
 
+// commandAckHandler is the legacy one-shot settled confirmation. It is
+// equivalent to a "settled" feedback report and only completes on settle.
 func commandAckHandler(runtime *Runtime) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		commandID, err := uuid.Parse(chi.URLParam(r, "commandID"))

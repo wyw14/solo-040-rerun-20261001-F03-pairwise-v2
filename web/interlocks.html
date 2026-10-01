@@ -1,10 +1,124 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LockFlow Interlocks</title><link rel="stylesheet" href="/assets/styles.css"></head>
 <body><header><div class="brand"><span class="brand-mark">LF</span>LockFlow</div><nav><a href="/operations">Operations</a><a href="/chamber">Chamber</a><a aria-current="page" href="/interlocks">Interlocks</a><a href="/incidents">Incidents</a></nav></header>
-<main><div class="page-title"><div><h1>Interlock control</h1><div class="muted">Mutual exclusion and emergency equipment state</div></div></div><div class="grid" id="interlock-grid"></div><div class="message" id="message"></div></main>
+<main><div class="page-title"><div><h1>Interlock control</h1><div class="muted">Command timeline, device feedback, safe resend and emergency equipment state</div></div><button id="refresh">Refresh</button></div><div class="grid" id="interlock-grid"></div><div class="message" id="message"></div></main>
 <script src="/assets/app.js"></script><script>
-const {api,setMessage,withBusy}=window.LockFlow; const host=document.querySelector('#interlock-grid'); const message=document.querySelector('#message');
-async function stop(chamber,button){await withBusy(button,async()=>{try{await api(`/api/chambers/${chamber}/emergency`,{method:'POST',body:'{}'});await load();}catch(e){setMessage(message,e.message);}});}
-async function load(){const data=await api('/api/interlocks');host.innerHTML=Object.entries(data).map(([id,item])=>`<section class="panel"><h2>${id}</h2><table><tr><th>Emergency</th><td>${item.emergency.status}</td></tr><tr><th>Level</th><td>${item.equipment.LevelM??item.equipment.level_m??0} m</td></tr><tr><th>Pending commands</th><td>${item.pending_commands.length}</td></tr></table><button class="danger" data-stop="${id}">Emergency stop</button></section>`).join('');host.querySelectorAll('[data-stop]').forEach((button)=>button.addEventListener('click',()=>stop(button.dataset.stop,button)));}
-load().catch((e)=>setMessage(message,e.message));
+const {api, shortID, setMessage, withBusy} = window.LockFlow;
+const host = document.querySelector('#interlock-grid');
+const message = document.querySelector('#message');
+
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+const clock = (t) => t ? new Date(t).toLocaleTimeString() : '—';
+
+function timeline(command) {
+  const steps = (command.timeline || []).map((e) =>
+    `<span class="step"><b>${esc(e.state)}</b> ${clock(e.at)}${e.reason ? ' · ' + esc(e.reason) : ''}</span>`);
+  return `<div class="timeline">${steps.join('')}</div>`;
+}
+
+// Device-side feedback controls, enabled only for the current lifecycle phase.
+// Received/executing are intermediate steps, not completion.
+function feedbackButtons(chamber, command) {
+  const attr = `data-chamber="${esc(chamber)}" data-command="${esc(command.id)}"`;
+  let buttons = '';
+  if (command.state === 'queued') {
+    buttons = `<button class="btn-mini" ${attr} data-phase="accepted">Device received</button>`;
+  } else if (command.state === 'accepted') {
+    buttons = `<button class="btn-mini" ${attr} data-phase="executing">Device executing</button>`;
+  } else if (command.state === 'executing') {
+    buttons = `<button class="btn-mini" ${attr} data-phase="settled">Report settled</button>`;
+  }
+  if (!['settled', 'cancelled'].includes(command.state)) {
+    buttons += ` <button class="btn-mini danger" ${attr} data-phase="failed">Report failure…</button>`;
+  }
+  return buttons;
+}
+
+function retryButton(chamber, command) {
+  if (command.state !== 'failed' && command.state !== 'timed_out') return '';
+  return `<button class="btn-mini" data-chamber="${esc(chamber)}" data-retry="${esc(command.id)}"
+    title="Re-issues the same command as a new attempt linked to this one; safety rules are re-checked.">
+    Safe resend (attempt ${command.attempt + 1})</button>`;
+}
+
+function commandRows(chamber, commands) {
+  if (!commands.length) return '<tr><td colspan="6" class="muted">No commands issued for this chamber</td></tr>';
+  return commands.map((command) => `
+    <tr>
+      <td><span class="badge ${esc(command.state)}">${esc(command.state)}</span></td>
+      <td>${esc(command.device)}<div class="chain">${esc(command.action)}${command.target ? ' → ' + command.target : ''}</div></td>
+      <td>${shortID(command.id)}<div class="chain">attempt ${command.attempt}${command.retry_of ? ' · resend of ' + shortID(command.retry_of) : ''}</div></td>
+      <td>${timeline(command)}</td>
+      <td>${command.failure_reason ? `<div class="fail-reason">${esc(command.failure_code ? command.failure_code + ': ' : '')}${esc(command.failure_reason)}</div>` : ''}</td>
+      <td>${feedbackButtons(chamber, command)}${retryButton(chamber, command)}</td>
+    </tr>`).join('');
+}
+
+async function sendFeedback(chamber, commandID, phase, button) {
+  let body = { phase };
+  if (phase === 'failed') {
+    const reason = window.prompt('Failure reason shown to the operator:', 'obstruction detected on gate travel');
+    if (reason === null) return;
+    const code = window.prompt('Failure code (optional):', 'OBSTRUCTED') || 'DEVICE_FAULT';
+    body = { phase, reason, code };
+  }
+  await withBusy(button, async () => {
+    try {
+      await api(`/api/chambers/${chamber}/commands/${commandID}/feedback`, { method: 'POST', body: JSON.stringify(body) });
+      setMessage(message, phase === 'settled'
+        ? 'Command settled — physical position confirmed and transit advanced.'
+        : `Command progress recorded (${phase}); transit stays waiting until settled.`);
+      await load();
+    } catch (e) { setMessage(message, e.message); }
+  });
+}
+
+async function sendRetry(chamber, commandID, button) {
+  await withBusy(button, async () => {
+    try {
+      const next = await api(`/api/chambers/${chamber}/commands/${commandID}/retry`, { method: 'POST', body: '{}' });
+      setMessage(message, `Resent as attempt ${next.attempt} (command ${shortID(next.id)}). Transit stays waiting until it settles.`);
+      await load();
+    } catch (e) { setMessage(message, e.message); }
+  });
+}
+
+async function stop(chamber, button) {
+  await withBusy(button, async () => {
+    try { await api(`/api/chambers/${chamber}/emergency`, { method: 'POST', body: '{}' }); await load(); }
+    catch (e) { setMessage(message, e.message); }
+  });
+}
+
+async function load() {
+  const data = await api('/api/interlocks');
+  host.innerHTML = Object.entries(data).filter(([id]) => id.startsWith('chamber')).map(([id, item]) => `
+    <section class="panel wide">
+      <h2>${id}</h2>
+      <table>
+        <tr><th>Emergency</th><td>${esc(item.emergency.status)}${item.emergency.message ? ' — ' + esc(item.emergency.message) : ''}</td></tr>
+        <tr><th>Level</th><td>${item.equipment.LevelM ?? item.equipment.level_m ?? 0} m</td></tr>
+        <tr><th>Pending commands</th><td>${item.pending_commands.length}</td></tr>
+      </table>
+      <button class="danger" data-stop="${id}">Emergency stop</button>
+      <h2 style="margin-top:18px">Device commands</h2>
+      <table><thead><tr><th>State</th><th>Device / action</th><th>Command</th><th>Timeline</th><th>Failure</th><th>Actions</th></tr></thead>
+      <tbody>${commandRows(id, item.commands || [])}</tbody></table>
+    </section>`).join('');
+  setMessage(message, '');
+}
+
+// Delegated handlers survive the innerHTML re-render every refresh.
+host.addEventListener('click', (event) => {
+  const stopBtn = event.target.closest('[data-stop]');
+  if (stopBtn) return stop(stopBtn.dataset.stop, stopBtn);
+  const retryBtn = event.target.closest('[data-retry]');
+  if (retryBtn) return sendRetry(retryBtn.dataset.chamber, retryBtn.dataset.retry, retryBtn);
+  const feedbackBtn = event.target.closest('[data-phase]');
+  if (feedbackBtn) return sendFeedback(feedbackBtn.dataset.chamber, feedbackBtn.dataset.command, feedbackBtn.dataset.phase, feedbackBtn);
+});
+
+document.querySelector('#refresh').addEventListener('click', () => load().catch((e) => setMessage(message, e.message)));
+load().catch((e) => setMessage(message, e.message));
+setInterval(() => load().catch(() => {}), 3000);
 </script></body></html>

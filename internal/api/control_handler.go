@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -31,28 +32,100 @@ func mustCurrent(runtime *Runtime, chamberID string) model.TransitCycle {
 	return cycleValue
 }
 
-func commandAckHandler(runtime *Runtime) http.HandlerFunc {
+type feedbackInput struct {
+	Phase      model.CommandState `json:"phase"`
+	Code       string             `json:"code,omitempty"`
+	Reason     string             `json:"reason,omitempty"`
+	ObservedAt time.Time          `json:"observed_at,omitempty"`
+}
+
+// commandFeedbackHandler receives a device report about one command. A
+// received (accepted) or executing report is progress, not completion; only a
+// settled report advances the transit. A failed report must carry the reason
+// the operator needs to decide on a safe resend.
+func commandFeedbackHandler(runtime *Runtime) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		chamberID := chi.URLParam(r, "chamberID")
 		commandID, err := uuid.Parse(chi.URLParam(r, "commandID"))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
 		command, ok := runtime.GateCommands.Get(commandID)
-		if !ok || command.ChamberID != chi.URLParam(r, "chamberID") {
+		if !ok || command.ChamberID != chamberID {
 			writeError(w, http.StatusNotFound, errors.New("command not found"))
 			return
 		}
-		ack := model.DeviceAck{
-			CommandID: command.ID, CycleID: command.CycleID, ChamberID: command.ChamberID,
-			Generation: command.Generation, Epoch: command.Epoch, Device: command.Device,
-			Settled: true, ObservedAt: runtime.Now().UTC(),
+		var input feedbackInput
+		if err := decodeJSON(r, &input); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
 		}
-		if err := runtime.Cycles.ApplyGateAck(r.Context(), ack); err != nil {
+		switch input.Phase {
+		case model.CommandAccepted, model.CommandExecuting, model.CommandSettled:
+		case model.CommandFailed:
+			if input.Reason == "" {
+				writeError(w, http.StatusBadRequest, errors.New("failed feedback requires a reason"))
+				return
+			}
+		default:
+			writeError(w, http.StatusBadRequest, errors.New("phase must be accepted, executing, settled or failed"))
+			return
+		}
+		feedback := model.DeviceFeedback{
+			CommandID: commandID, Phase: input.Phase, Code: input.Code,
+			Reason: input.Reason, ObservedAt: input.ObservedAt,
+		}
+		if feedback.ObservedAt.IsZero() {
+			feedback.ObservedAt = runtime.Now().UTC()
+		}
+		updated, err := runtime.Cycles.ApplyCommandFeedback(r.Context(), feedback)
+		if err != nil {
 			writeError(w, http.StatusConflict, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, ack)
+		writeJSON(w, http.StatusOK, updated)
+	}
+}
+
+// commandRetryHandler safely resends a failed/timed-out command as a new
+// attempt linked to the original. Safety rules are enforced by the interlock
+// coordinator. The transit stays in its current stage.
+func commandRetryHandler(runtime *Runtime) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		chamberID := chi.URLParam(r, "chamberID")
+		commandID, err := uuid.Parse(chi.URLParam(r, "commandID"))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if _, ok := runtime.GateCommands.Get(commandID); !ok {
+			writeError(w, http.StatusNotFound, errors.New("command not found"))
+			return
+		}
+		cycleValue, ok := runtime.Cycles.Current(chamberID)
+		if !ok {
+			writeError(w, http.StatusConflict, errors.New("active transit not found"))
+			return
+		}
+		command, err := runtime.Interlocks.RetryCommand(r.Context(), cycleValue, commandID)
+		if err != nil {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, command)
+	}
+}
+
+// commandsHandler returns the full command timeline for a chamber, including
+// terminal and retried attempts, newest last.
+func commandsHandler(runtime *Runtime) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		chamberID := chi.URLParam(r, "chamberID")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"chamber_id": chamberID,
+			"commands":   runtime.GateCommands.List(chamberID),
+		})
 	}
 }
 

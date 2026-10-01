@@ -84,7 +84,7 @@ func (c *Controller) IssueValve(ctx context.Context, cycle model.TransitCycle, t
 		device = model.DeviceDrainValve
 		target = -target
 	}
-	command, err := c.commands.Issue(cycle, device, "set_opening", target, c.now())
+	command, err := c.commands.IssueUnsupervised(cycle, device, "set_opening", target, c.now())
 	if err != nil {
 		return err
 	}

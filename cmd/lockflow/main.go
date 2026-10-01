@@ -44,6 +44,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	go runtime.GateWatchdog.Run(ctx)
 	server := &http.Server{
 		Addr: configuration.address, Handler: api.Router(runtime, configuration.webDirectory),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second,

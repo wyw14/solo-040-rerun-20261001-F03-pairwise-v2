@@ -41,3 +41,19 @@ func (p Policy) ValidateClose(snapshot EquipmentSnapshot, direction model.Direct
 	}
 	return nil
 }
+
+// ValidateRetry decides whether a terminally failed command may be re-driven.
+// The duplicate-command guard in ValidateClose does not apply here: the caller
+// has already established that no attempt of this intent is active and that the
+// previous attempt failed (e.g. a gate stalled mid-close). Re-driving a stalled
+// gate toward the safe closed seat is itself the recovery action. An open retry
+// still carries the full open hazard (level window, opposite gate seated).
+func (p Policy) ValidateRetry(snapshot EquipmentSnapshot, command model.DeviceCommand, direction model.Direction) error {
+	if !command.IsGate() {
+		return nil
+	}
+	if command.Action == "open" {
+		return p.ValidateOpen(snapshot, direction)
+	}
+	return nil
+}

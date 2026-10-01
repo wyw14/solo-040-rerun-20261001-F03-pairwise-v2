@@ -53,6 +53,25 @@ th { color: #91a0a8; font-weight: 600; }
 .status.warning::before { background: #f2c14e; }
 .status.critical::before { background: #ef6f6c; }
 .message { min-height: 22px; color: #f2c14e; font-size: 13px; margin-top: 10px; white-space: pre-wrap; }
+
+/* Command lifecycle */
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  font-weight: 600; letter-spacing: .02em; border: 1px solid transparent; white-space: nowrap;
+}
+.badge.queued    { background: #26313a; color: #b9c4ca; border-color: #465761; }
+.badge.accepted  { background: #1d3a4a; color: #7fd1de; border-color: #2f6577; }
+.badge.executing { background: #3a3420; color: #f2c14e; border-color: #7a6420; }
+.badge.settled   { background: #1f3d2c; color: #6fd09a; border-color: #2f7a52; }
+.badge.failed, .badge.timed_out { background: #4a2222; color: #ef6f6c; border-color: #8f3434; }
+.badge.cancelled { background: #2c2c2c; color: #91a0a8; border-color: #465761; }
+.timeline { display: flex; flex-wrap: wrap; gap: 6px; }
+.timeline .step { font-size: 11px; color: #91a0a8; border: 1px solid #2c3941; border-radius: 4px; padding: 2px 6px; }
+.timeline .step b { color: #ecf1f4; font-weight: 600; }
+.fail-reason { color: #ef6f6c; font-size: 12px; margin-top: 6px; }
+.chain { color: #91a0a8; font-size: 11px; }
+.btn-mini { min-height: 28px; padding: 3px 9px; font-size: 12px; margin: 2px 4px 2px 0; }
+.btn-mini.danger { border-color: #ef6f6c; background: #6f2c2c; }
 @media (max-width: 780px) {
   header { height: auto; padding: 14px 18px; align-items: flex-start; flex-direction: column; gap: 10px; }
   main { padding: 20px 16px 40px; }

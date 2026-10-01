@@ -1,9 +1,17 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LockFlow Incidents</title><link rel="stylesheet" href="/assets/styles.css"></head>
 <body><header><div class="brand"><span class="brand-mark">LF</span>LockFlow</div><nav><a href="/operations">Operations</a><a href="/chamber">Chamber</a><a href="/interlocks">Interlocks</a><a aria-current="page" href="/incidents">Incidents</a></nav></header>
-<main><div class="page-title"><div><h1>Incident review</h1><div class="muted">Persisted cancellation, recovery and emergency events</div></div><button id="refresh">Refresh</button></div><section class="panel wide"><table><thead><tr><th>Severity</th><th>Chamber</th><th>Summary</th><th>Sequence</th><th>Time</th></tr></thead><tbody id="incidents"></tbody></table></section><div class="message" id="message"></div></main>
+<main><div class="page-title"><div><h1>Incident review</h1><div class="muted">Command failures, timeouts, retries and emergency events</div></div><button id="refresh">Refresh</button></div><section class="panel wide"><table><thead><tr><th>Severity</th><th>Chamber</th><th>Summary</th><th>Device / Detail</th><th>Sequence</th><th>Time</th></tr></thead><tbody id="incidents"></tbody></table></section><div class="message" id="message"></div></main>
 <script src="/assets/app.js"></script><script>
 const {api,setMessage}=window.LockFlow;const body=document.querySelector('#incidents');const message=document.querySelector('#message');
-async function load(){const items=await api('/api/incidents');body.innerHTML=items.map((item)=>`<tr><td><span class="status ${item.severity}">${item.severity}</span></td><td>${item.chamber_id}</td><td>${item.summary}</td><td>${item.sequence}</td><td>${new Date(item.occurred_at).toLocaleString()}</td></tr>`).join('')||'<tr><td colspan="5" class="muted">No incidents awaiting review</td></tr>';setMessage(message,'');}
+async function load(){
+  const items=await api('/api/incidents');
+  body.innerHTML=items.map((item)=>{
+    const detail=item.detail?`<span class="muted">${item.device||''}</span><br>${item.detail}`:(item.device||'');
+    return `<tr><td><span class="status ${item.severity}">${item.severity}</span></td><td>${item.chamber_id}</td><td>${item.summary}</td><td>${detail||'-'}</td><td>${item.sequence}</td><td>${new Date(item.occurred_at).toLocaleString()}</td></tr>`;
+  }).join('')||'<tr><td colspan="6" class="muted">No incidents awaiting review</td></tr>';
+  setMessage(message,'');
+}
 document.querySelector('#refresh').addEventListener('click',()=>load().catch((e)=>setMessage(message,e.message)));load().catch((e)=>setMessage(message,e.message));
+setInterval(()=>load().catch(()=>{}),5000);
 </script></body></html>

@@ -79,35 +79,43 @@ func (c *Coordinator) Cancel(ctx context.Context, chamberID, reason string) (mod
 	return cycleValue, err
 }
 
-func (c *Coordinator) ApplyGateAck(ctx context.Context, ack model.DeviceAck) error {
-	command, err := c.gates.Confirm(ctx, ack)
+// ApplyCommandFeedback feeds a device report into the command lifecycle. The
+// transit stage is held unchanged for accepted/executing/failed reports — only
+// a gate command that truly settles advances the cycle. A failed or timed-out
+// command therefore leaves the transit waiting for an operator resend.
+func (c *Coordinator) ApplyCommandFeedback(ctx context.Context, feedback model.DeviceFeedback) (model.DeviceCommand, error) {
+	command, err := c.gates.ApplyFeedback(ctx, feedback)
 	if err != nil {
-		return err
+		return model.DeviceCommand{}, err
+	}
+	if feedback.Phase != model.CommandSettled || !command.IsGate() {
+		// Received or in-progress (or a valve event): the transit keeps waiting.
+		return command, nil
 	}
 	c.mu.Lock()
-	cycleValue, ok := c.current[ack.ChamberID]
+	cycleValue, ok := c.current[command.ChamberID]
 	if !ok || cycleValue.Stage.Terminal() || !cycleValue.IdentityMatches(command.CycleID, command.Generation) {
 		c.mu.Unlock()
-		return errors.New("device acknowledgement belongs to an inactive transit generation")
+		return command, errors.New("device acknowledgement belongs to an inactive transit generation")
 	}
 	next, err := nextAfterGate(cycleValue.Stage)
 	if err == nil {
 		err = cycleValue.Advance(next, "matching gate command settled", c.now())
 	}
 	if err == nil {
-		c.current[ack.ChamberID] = cycleValue
+		c.current[command.ChamberID] = cycleValue
 	}
 	c.mu.Unlock()
 	if err != nil {
-		return err
+		return command, err
 	}
 	if next == model.StageLeveling {
 		if err := c.hydraulics.BeginLeveling(cycleValue); err != nil {
-			return err
+			return command, err
 		}
 	}
-	_, err = c.recorder.Record(ctx, ack.ChamberID, model.EventCycleAdvanced, cycleValue.ID, cycleValue.Generation, cycleValue)
-	return err
+	_, err = c.recorder.Record(ctx, command.ChamberID, model.EventCycleAdvanced, cycleValue.ID, cycleValue.Generation, cycleValue)
+	return command, err
 }
 
 func (c *Coordinator) ApplySignalHandoff(ctx context.Context, cycleID uuid.UUID, generation uint64) error {

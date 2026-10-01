@@ -25,6 +25,7 @@ type Runtime struct {
 	GateState       *gate.State
 	GateCommands    *gate.Commands
 	Gates           *gate.Controller
+	GateWatchdog    *gate.Watchdog
 	SignalStore     *signal.Store
 	SignalPublisher *signal.Publisher
 	Signals         *signal.Service
@@ -58,6 +59,7 @@ func NewRuntime(ctx context.Context, dataDirectory string) (*Runtime, error) {
 	gateState := gate.NewState(chambers...)
 	gateCommands := gate.NewCommands()
 	gateController := gate.NewController(gateState, gateCommands, recorder, now)
+	gateWatchdog := gate.NewWatchdog(gateController, time.Second)
 	signalStore := signal.NewStore()
 	signalPublisher := signal.NewPublisher(signalStore, recorder, now)
 	signalService := signal.NewService(signalStore)
@@ -108,7 +110,7 @@ func NewRuntime(ctx context.Context, dataDirectory string) (*Runtime, error) {
 	}
 	return &Runtime{
 		Store: store, Recorder: recorder, GateState: gateState,
-		GateCommands: gateCommands, Gates: gateController,
+		GateCommands: gateCommands, Gates: gateController, GateWatchdog: gateWatchdog,
 		SignalStore: signalStore, SignalPublisher: signalPublisher, Signals: signalService,
 		AdmissionQueue: admissionController.Queue(), Admission: admissionService,
 		Planner: planner, Schedule: scheduleService, Hydraulics: hydraulicsController,
